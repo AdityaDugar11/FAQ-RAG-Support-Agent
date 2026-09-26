@@ -1,0 +1,379 @@
+{
+  "name": "FAQ RAG Support Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "faq-support",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "705e7ff5-44e6-4763-9b60-cee83f00cd89",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -592,
+        288
+      ],
+      "webhookId": "faq-support-webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "wZbZ5FGJaiDhGlF8",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// RETRIEVAL: basic keyword/term-overlap search over a hardcoded\n// FAQ knowledge base. No embeddings, no vector DB, no API cost.\n//\n// LIMITATION (read this before you ship it): this only matches\n// on shared words. \"when will my order get here\" will NOT match\n// \"shipping time\" unless you add synonyms. For paraphrase-heavy\n// traffic, swap this node for n8n's Embeddings + In-Memory Vector\n// Store nodes instead.\n//\n// Replace faqKB below with your real FAQ data, or load it from a\n// Google Sheet / Postgres / JSON file node upstream of this one\n// instead of hardcoding it here.\n// ============================================================\n\nconst faqKB = [\n  {\n    id: \"shipping_time\",\n    question: \"How long does shipping take?\",\n    answer: \"Standard shipping takes 3-5 business days within India. Express shipping (extra cost) takes 1-2 business days.\"\n  },\n  {\n    id: \"return_policy\",\n    question: \"What is your return policy?\",\n    answer: \"You can return any unused item within 7 days of delivery for a full refund. Items must be in original packaging.\"\n  },\n  {\n    id: \"payment_methods\",\n    question: \"What payment methods do you accept?\",\n    answer: \"We accept UPI, credit/debit cards, net banking, and cash on delivery for orders under Rs 5000.\"\n  },\n  {\n    id: \"order_tracking\",\n    question: \"How do I track my order?\",\n    answer: \"You'll receive a tracking link via SMS and email once your order ships. You can also check order status in the 'My Orders' section.\"\n  },\n  {\n    id: \"cancel_order\",\n    question: \"Can I cancel my order?\",\n    answer: \"Orders can be cancelled within 1 hour of placing them, before they're packed. After that, you'll need to use the return process instead.\"\n  }\n];\n\nconst userMessage =\n  ($json.body && ($json.body.message || $json.body.text)) ||\n  $json.message ||\n  '';\n\nfunction tokenize(str) {\n  return (str || '')\n    .toLowerCase()\n    .replace(/[^\\w\\s]/g, ' ')\n    .split(/\\s+/)\n    .filter(Boolean);\n}\n\nconst stopwords = new Set([\n  'the','a','an','is','are','do','does','how','what','can',\n  'i','my','your','you','to','for','of','in','on','it','this','that','will','get'\n]);\n\nfunction keywords(str) {\n  return tokenize(str).filter(w => !stopwords.has(w));\n}\n\nconst queryWords = keywords(userMessage);\n\nfunction scoreEntry(entry) {\n  const entryWords = keywords(`${entry.question} ${entry.answer}`);\n  const entryWordSet = new Set(entryWords);\n  let overlap = 0;\n  for (const w of queryWords) {\n    if (entryWordSet.has(w)) overlap += 1;\n  }\n  return queryWords.length ? overlap / queryWords.length : 0;\n}\n\nconst scored = faqKB\n  .map(entry => ({ ...entry, score: scoreEntry(entry) }))\n  .sort((a, b) => b.score - a.score);\n\nconst topMatches = scored.filter(e => e.score > 0).slice(0, 3);\n\nconst contextText = topMatches.length\n  ? topMatches.map(e => `Q: ${e.question}\\nA: ${e.answer}`).join('\\n\\n')\n  : 'NO_RELEVANT_CONTEXT_FOUND';\n\nreturn [{\n  json: {\n    userMessage,\n    topMatches,\n    contextText,\n    hasContext: topMatches.length > 0\n  }\n}];\n"
+      },
+      "id": "8bb9702f-b581-4085-bc30-bd21278a8456",
+      "name": "Retrieve Context (Keyword Search)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the LLM's JSON response and defensively fall back if it\n// returns malformed JSON (it will, occasionally -- plan for it).\n\nconst raw = $json.choices?.[0]?.message?.content || '';\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  parsed = {\n    answer: \"Sorry, I'm having trouble answering right now -- let me get a human to help you.\",\n    confidence: 0\n  };\n}\n\nlet confidence = Number(parsed.confidence);\nif (isNaN(confidence)) confidence = 0;\nconfidence = Math.max(0, Math.min(1, confidence));\n\nreturn [{\n  json: {\n    answer: parsed.answer || \"Let me get a human to help you with that.\",\n    confidence,\n    message: $('Retrieve Context (Keyword Search)').item.json.userMessage\n  }\n}];\n"
+      },
+      "id": "a037b263-871c-4794-8f45-c454c5c935df",
+      "name": "Parse LLM Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 0.7,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9534b3fb-a847-498b-b271-92f84c332da6",
+      "name": "Confidence >= 0.7?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        512,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "responsePayload",
+              "type": "object",
+              "value": "={{ { answer: $json.answer, confidence: $json.confidence, escalated: false } }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "172c4f7a-1b21-42ae-a3f6-7111029d550b",
+      "name": "Format Success Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        752,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.responsePayload }}",
+        "options": {}
+      },
+      "id": "3341c9b2-a55e-4cc0-9cdd-8e4c58685502",
+      "name": "Respond to Webhook (Answer)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        976,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: \":rotating_light: Low-confidence FAQ answer -- human review needed\\n*Customer message:* \" + $json.userMessage + \"\\n*Bot draft answer:* \" + $json.answer + \"\\n*Confidence:* \" + $json.confidence }) }}",
+        "options": {}
+      },
+      "id": "b14dae4c-cf07-4d18-b7e6-636674475b53",
+      "name": "Notify Human (Slack)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "responsePayload",
+              "type": "object",
+              "value": "={{ { answer: \"Thanks for reaching out! I'm not fully confident I have the right answer, so I've looped in a member of our team -- they'll follow up with you shortly.\", confidence: $json.confidence, escalated: true } }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "aa04dae0-d6c4-4f8c-b849-a9fedadb654d",
+      "name": "Format Fallback Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        976,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.responsePayload }}",
+        "options": {}
+      },
+      "id": "2a377aee-c265-4743-b527-7ee7c404e9db",
+      "name": "Respond to Webhook (Escalated)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"qwen/qwen3.8-27b\",\n  temperature: 0.2,\n  response_format: { type: \"json_object\" },\n  messages: [\n    {\n      role: \"system\",\n      content: \"You are a customer support assistant. Answer ONLY using the information inside the CONTEXT block. Do not use outside knowledge or make anything up.\\n\\nIf CONTEXT is 'NO_RELEVANT_CONTEXT_FOUND' or does not contain enough information to answer confidently, do not guess -- give confidence below 0.5 and a short polite answer saying you're not sure and will get a human to help.\\n\\nRespond with ONLY valid JSON, no markdown formatting, no code fences, no extra text, in exactly this shape:\\n{\\\"answer\\\": \\\"<answer to the customer, under 80 words, friendly and concise>\\\", \\\"confidence\\\": <number between 0 and 1>}\\n\\nConfidence rules:\\n- 0.85-1.0: CONTEXT directly and completely answers the question.\\n- 0.5-0.84: CONTEXT partially answers it or you had to infer a little.\\n- 0.0-0.49: CONTEXT is missing, unrelated, or insufficient.\\n\\nNever invent facts, prices, policies, or timelines that are not in CONTEXT.\"\n    },\n    {\n      role: \"user\",\n      content: \"CONTEXT:\\n\" + $json.contextText + \"\\n\\nCUSTOMER QUESTION:\\n\" + $json.userMessage\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "c771c63c-fbc4-40ab-969a-cc628d40edb8",
+      "name": "groq api",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -160,
+        288
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "Xrmkun0Z3izF6K1U",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "airtableTokenApi",
+        "operation": "append",
+        "application": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": ""
+        },
+        "table": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_TABLE_ID",
+          "mode": ""
+        },
+        "options": {}
+      },
+      "id": "b2930c5d-b9b4-4bab-a146-d81837960b2b",
+      "name": "Airtable Fixed",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 1,
+      "position": [
+        304,
+        288
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "GhjJq0Un7ZwqDkLb",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Retrieve Context (Keyword Search)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Context (Keyword Search)": {
+      "main": [
+        [
+          {
+            "node": "groq api",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Response": {
+      "main": [
+        [
+          {
+            "node": "Airtable Fixed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confidence >= 0.7?": {
+      "main": [
+        [
+          {
+            "node": "Format Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Human (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Success Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook (Answer)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Human (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Format Fallback Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Fallback Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook (Escalated)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "groq api": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable Fixed": {
+      "main": [
+        [
+          {
+            "node": "Confidence >= 0.7?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "04b2ccd9-0daa-43db-a347-0fb86d421d5f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "541744bc99d863f61206cf67f6e7651b50723b1dbe1d5d67cb0a3eb48e786621"
+  },
+  "nodeGroups": [],
+  "id": "2VyXTm4cl87fdbcD",
+  "tags": []
+}

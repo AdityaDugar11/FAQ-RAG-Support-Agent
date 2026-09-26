@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FAQ RAG Support Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>📊 FAQ RAG Support Dashboard</h1>
+            <p class="subtitle">Ask questions, get instant answers</p>
+        </header>
+
+        <!-- Authentication Section -->
+        <section class="auth-section">
+            <div class="auth-controls">
+                <input 
+                    type="password" 
+                    id="airtableToken" 
+                    placeholder="Paste your Airtable API token here"
+                    class="token-input"
+                >
+                <button id="loadDataBtn" class="btn btn-primary">Load Data</button>
+            </div>
+            <div id="status" class="status"></div>
+        </section>
+
+        <!-- Metrics Section -->
+        <section class="metrics-section">
+            <div class="metric-card">
+                <div class="metric-label">Total Requests</div>
+                <div class="metric-value" id="totalRequests">—</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Escalation Rate</div>
+                <div class="metric-value" id="escalationRate">—</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Avg Confidence</div>
+                <div class="metric-value" id="avgConfidence">—</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Today's Requests</div>
+                <div class="metric-value" id="todayRequests">—</div>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section" id="chartsSection" style="display: none;">
+            <div class="charts-row">
+                <div class="chart-card">
+                    <h3>CONFIDENCE DISTRIBUTION</h3>
+                    <div class="chart-container">
+                        <canvas id="confidenceChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <h3>ESCALATION VS RESOLVED</h3>
+                    <div class="chart-container">
+                        <canvas id="escalationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-card top-questions-card">
+                <h3>TOP QUESTIONS BY FREQUENCY</h3>
+                <div class="chart-container horizontal-container">
+                    <canvas id="topQuestionsChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Question Input Section -->
+        <section class="input-section" id="inputSection" style="display: none;">
+            <h2>Ask a Question</h2>
+            <div class="input-controls">
+                <textarea 
+                    id="questionInput" 
+                    placeholder="Type your question here..."
+                    rows="3"
+                    class="question-textarea"
+                ></textarea>
+                <div class="button-group">
+                    <button id="sendBtn" class="btn btn-send">Send</button>
+                    <button id="clearBtn" class="btn btn-secondary">Clear</button>
+                </div>
+            </div>
+            <div id="responseMessage" class="response-message" style="display: none;"></div>
+        </section>
+
+        <!-- Historical Data Section -->
+        <section class="history-section" id="historySection" style="display: none;">
+            <h2>Question History</h2>
+            <div id="historyContainer" class="history-container"></div>
+        </section>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="loading-indicator" style="display: none;">
+            <div class="spinner"></div>
+            <p>Processing your question...</p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
