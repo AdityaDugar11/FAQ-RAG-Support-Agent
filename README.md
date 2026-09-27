@@ -8,8 +8,7 @@ An AI-powered customer support assistant that handles FAQs, escalates complex qu
 
 ## Dashboard
 
-*(Dashboard image will be added here)*
-<!-- ![Dashboard](assets/dashboard.png) -->
+![Dashboard](assets/dashboard.png)
 
 ## Deployment
 
